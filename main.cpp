@@ -31,26 +31,23 @@ int main() {
     int frameCounter = 0; // To make the cursor blink
 
     /*
-     * Tokyo Night Color Palette
-     * -------------------------
-     * COL_BAR_BG: Semi-transparent dark blue for the glassy effect.
-     * COL_TEXT: Soft white for readability.
-     * COL_ACCENT: Bright blue for the cursor.
-     * COL_ICON: Dimmed white for the magnifying glass.
+     * Tokyo Night Color Palette (Glassmorphism Edition)
+     * -------------------------------------------------
+     * COL_BAR_BG: Deep, high-transparency blue for the base glass.
+     * COL_BORDER: Faint white/blue rim to define edges.
+     * COL_HIGHLIGHT: Subtle white overlay for the top reflection.
      */
-    const Color COL_BAR_BG = {36, 40, 59, 230};
-    const Color COL_TEXT = {169, 177, 214, 255};
+    const Color COL_BAR_BG = {20, 25, 40, 200};      // Deep Glass
+    const Color COL_BORDER = {120, 140, 180, 80};    // Soft Rim
+    const Color COL_TEXT = {192, 202, 245, 255};
     const Color COL_ACCENT = {122, 162, 247, 255};
     const Color COL_ICON = {169, 177, 214, 200};
 
     /*
      * Search Bar Geometry
      * -------------------
-     * We calculate the bar dimensions based on the screen size minus a small
-     * margin. This margin allows the rounded corners to be anti-aliased correctly
-     * against the transparent background.
      */
-    const float margin = 5; // Reduced padding
+    const float margin = 10; // Increased for border space
     const float barWidth = screenWidth - (margin * 2);
     const float barHeight = screenHeight - (margin * 2);
     const float barX = margin;
@@ -61,27 +58,21 @@ int main() {
     /*
      * Window Dragging State
      * ---------------------
-     * Since the window is undecorated, we must manually handle window movement.
-     * dragStartOffset stores the mouse position relative to the window when
-     * dragging starts.
      */
     bool isDragging = false;
-    Vector2 dragStartOffset = {0, 0};
 
     // Main game loop
     while (!WindowShouldClose()) {
         /*
          * Update Logic: Window Dragging
          * -----------------------------
-         * 1. Detect Left Click: Start dragging if clicked inside the bar.
-         * 2. Detect Release: Stop dragging.
-         * 3. While Dragging: Calculate the delta (movement) and update the window
-         * position.
+         * We use GetMouseDelta() which returns the mouse movement in screen coordinates
+         * (or relative to the previous frame). This is the standard, stable way to
+         * handle dragging in Raylib for undecorated windows.
          */
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             if (CheckCollisionPointRec(GetMousePosition(), searchBarRect)) {
                 isDragging = true;
-                dragStartOffset = GetMousePosition();
             }
         }
 
@@ -90,31 +81,39 @@ int main() {
         }
 
         if (isDragging) {
-            Vector2 mousePos = GetMousePosition();
-            Vector2 delta = {mousePos.x - dragStartOffset.x, mousePos.y - dragStartOffset.y};
-
-            // Get current window pos to update it
+            Vector2 delta = GetMouseDelta();
             Vector2 winPos = GetWindowPosition();
             SetWindowPosition((int)(winPos.x + delta.x), (int)(winPos.y + delta.y));
         }
-
         /*
          * Update Logic: Text Input
          * ------------------------
-         * We capture character presses for typing and KEY_BACKSPACE for deletion.
-         * GetCharPressed() handles layout-independent text input (e.g., Shift+Key).
          */
         int key = GetCharPressed();
         while (key > 0) {
-            // Only accept visible characters (ASCII 32..125)
             if ((key >= 32) && (key <= 125)) {
                 searchQuery += (char)key;
             }
             key = GetCharPressed();
         }
+
+        // Handle Backspace
         if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
             if (!searchQuery.empty()) {
-                searchQuery.pop_back();
+                // Check for Option/Alt key for word deletion
+                if (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT)) {
+                    // Remove trailing spaces first if any
+                    while (!searchQuery.empty() && searchQuery.back() == ' ') {
+                        searchQuery.pop_back();
+                    }
+                    // Remove characters until a space is found
+                    while (!searchQuery.empty() && searchQuery.back() != ' ') {
+                        searchQuery.pop_back();
+                    }
+                } else {
+                    // Standard single character deletion
+                    searchQuery.pop_back();
+                }
             }
         }
 
@@ -125,18 +124,15 @@ int main() {
          * ------------------
          */
         BeginDrawing();
-        /*
-         * clearBackground(BLANK) is crucial for the transparent window effect.
-         * It clears the buffer to fully transparent pixels.
-         */
         ClearBackground(BLANK);
 
-        /*
-         * Draw Search Bar Background
-         * --------------------------
-         * We use a high roundness value (0.5f) to create a pill-shaped container.
-         */
-        DrawRectangleRounded(searchBarRect, 0.7f, 10, COL_BAR_BG);
+        // 1. Base Glass Layer
+        DrawRectangleRounded(searchBarRect, 0.8f, 20, COL_BAR_BG);
+
+        // 2. [Removed Gloss Effect for uniform look]
+
+        // 3. Rim / Border
+        DrawRectangleRoundedLines(searchBarRect, 0.8f, 20, COL_BORDER);
 
         /*
          * Draw Magnifying Glass Icon
