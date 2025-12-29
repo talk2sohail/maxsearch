@@ -1,14 +1,36 @@
-CXX = g++
-CXXFLAGS = -std=c++17 -O3 -Wall -Wextra -I/opt/homebrew/include
-LDFLAGS = -L/opt/homebrew/lib -lraylib -framework IOKit -framework Cocoa -framework OpenGL -framework CoreServices -framework CoreFoundation -framework AppKit
+# Odin Makefile
 
-all: clean format build
+APP_NAME = maxsearch
+SRC_DIR = .
+OUT_DIR = bin
 
-build: main.cpp SearchEngine.cpp MacUtils.mm
-	$(CXX) $(CXXFLAGS) main.cpp SearchEngine.cpp MacUtils.mm -o maxsearch $(LDFLAGS)
+# Ensure output directory exists
+$(shell mkdir -p $(OUT_DIR))
 
-format:
-	clang-format -i *.cpp
+# Compiler flags
+# -debug: Generate debug info (creates .dSYM on macOS)
+# -o:speed: Optimize for speed (use for release builds)
+FLAGS = -debug
 
+.PHONY: all build run clean
+
+all: build
+
+# Build the executable
+# We build the directory $(SRC_DIR) because main.odin and search_engine.odin are there
+build:
+	odin build $(SRC_DIR) -out:$(OUT_DIR)/$(APP_NAME) $(FLAGS)
+
+# Build and run
+run: build
+	./$(OUT_DIR)/$(APP_NAME)
+
+# Release build (optimized)
+release:
+	odin build $(SRC_DIR) -out:$(OUT_DIR)/$(APP_NAME) -o:speed
+
+# Clean up
 clean:
-	rm -f main maxsearch
+	rm -rf $(OUT_DIR)
+	rm -rf *.dSYM
+	rm -rf $(SRC_DIR)/*.dSYM
