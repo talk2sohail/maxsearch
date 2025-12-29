@@ -1,4 +1,5 @@
 #include "SearchEngine.h"
+#include <algorithm>
 
 // Helper to auto-release CF types
 template <typename T> struct CFGuard {
@@ -115,10 +116,13 @@ void SearchEngine::SearchWorker() {
         if (MDQueryExecute(query.obj, kMDQuerySynchronous)) {
             // 4. Gather Results
             CFIndex count = MDQueryGetResultCount(query.obj);
-            if (count > 10)
-                count = 10; // Limit to 10 for speed
+            // Fetch more candidates (50) to ensure apps bubble up, even if ranked lower by default
+            if (count > 50)
+                count = 50;
 
             std::vector<std::string> tempResults;
+            tempResults.reserve(count);
+
             for (CFIndex i = 0; i < count; i++) {
                 // Get the Item
                 MDItemRef item = (MDItemRef)MDQueryGetResultAtIndex(query.obj, i);
@@ -130,6 +134,24 @@ void SearchEngine::SearchWorker() {
                 if (path.obj) {
                     tempResults.push_back(CFStringToString(path.obj));
                 }
+            }
+
+            // Sort: Apps first, then by length (shorter = likely more relevant)
+            std::stable_sort(tempResults.begin(), tempResults.end(),
+                             [](const std::string &a, const std::string &b) {
+                                 bool aIsApp =
+                                     (a.length() > 4 && a.substr(a.length() - 4) == ".app");
+                                 bool bIsApp =
+                                     (b.length() > 4 && b.substr(b.length() - 4) == ".app");
+
+                                 if (aIsApp != bIsApp)
+                                     return aIsApp;              // Apps come first
+                                 return a.length() < b.length(); // Shorter paths come next
+                             });
+
+            // Trim to top 10 for display
+            if (tempResults.size() > 10) {
+                tempResults.resize(10);
             }
 
             // 5. Publish Results

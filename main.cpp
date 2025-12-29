@@ -1,7 +1,20 @@
+#include "MacUtils.h"
 #include "SearchEngine.h"
 #include "raylib.h"
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
+
+// Helper for case-insensitive prefix check
+bool StartsWithCaseInsensitive(const std::string &full, const std::string &prefix) {
+    if (prefix.length() > full.length())
+        return false;
+    return std::equal(prefix.begin(), prefix.end(), full.begin(),
+                      [](char a, char b) { return std::tolower(a) == std::tolower(b); });
+}
 
 int main() {
     /*
@@ -24,6 +37,9 @@ int main() {
     std::string searchQuery = "";
     int frameCounter = 0; // To make the cursor blink
 
+    // Icon Cache to avoid re-loading textures every frame
+    std::map<std::string, Texture2D> iconCache;
+
     /*
      * Tokyo Night Color Palette (Glassmorphism Edition)
      * -------------------------------------------------
@@ -33,6 +49,7 @@ int main() {
     const Color COL_TEXT = {192, 202, 245, 255};
     const Color COL_ACCENT = {122, 162, 247, 255};
     const Color COL_ICON = {169, 177, 214, 200};
+    const Color COL_GHOST = {169, 177, 214, 100}; // Dimmed text for suggestions
 
     /*
      * Search Bar Geometry
@@ -75,6 +92,25 @@ int main() {
         }
 
         /*
+         * Fetch Results & Calculate Suggestion
+         * ------------------------------------
+         */
+        std::vector<std::string> results = engine.GetResults();
+        std::string suggestionSuffix = "";
+        std::string suggestedFilename = "";
+
+        if (!searchQuery.empty() && !results.empty()) {
+            // Get just the filename from the full path
+            std::filesystem::path firstPath(results[0]);
+            suggestedFilename = firstPath.filename().string();
+
+            if (StartsWithCaseInsensitive(suggestedFilename, searchQuery)) {
+                // The part of the filename we haven't typed yet
+                suggestionSuffix = suggestedFilename.substr(searchQuery.length());
+            }
+        }
+
+        /*
          * Update Logic: Text Input
          * ------------------------
          */
@@ -101,6 +137,12 @@ int main() {
                 }
                 textChanged = true;
             }
+        }
+
+        // Handle Tab Completion
+        if (IsKeyPressed(KEY_TAB) && !suggestionSuffix.empty()) {
+            searchQuery += suggestionSuffix;
+            textChanged = true;
         }
 
         // Trigger Search if text changed
@@ -140,8 +182,8 @@ int main() {
         DrawLineEx(start, end, 3.0f, COL_ICON);
 
         /*
-         * Draw Text & Cursor
-         * ------------------
+         * Draw Text, Suggestion & Cursor
+         * ------------------------------
          */
         int baseTextX = (int)barX + 55;
         int textPadding = 4;
@@ -155,8 +197,17 @@ int main() {
             DrawText("Max Search here", baseTextX + textPadding, textY, fontSize,
                      Fade(COL_TEXT, 0.5f));
         } else {
+            // Draw User Text
             DrawText(searchQuery.c_str(), baseTextX + textPadding, textY, fontSize, COL_TEXT);
+            // Bold effect
             DrawText(searchQuery.c_str(), baseTextX + textPadding + 1, textY, fontSize, COL_TEXT);
+
+            // Draw Ghost Text (Suggestion)
+            if (!suggestionSuffix.empty()) {
+                int userTextWidth = MeasureText(searchQuery.c_str(), fontSize);
+                DrawText(suggestionSuffix.c_str(), baseTextX + textPadding + userTextWidth, textY,
+                         fontSize, COL_GHOST);
+            }
         }
 
         if ((frameCounter / 30) % 2 == 0) {
@@ -168,18 +219,44 @@ int main() {
         }
 
         /*
-         * Render Results (Prototype)
-         * --------------------------
+         * Render Results with Icons
+         * -------------------------
          */
-        std::vector<std::string> results = engine.GetResults();
         int resultY = barY + barHeight + 10;
+        int iconSize = 24;
 
         for (const auto &res : results) {
-            DrawText(res.c_str(), barX + 20, resultY, 20, COL_TEXT);
-            resultY += 25;
+            // 1. Icon Management
+            if (iconCache.find(res) == iconCache.end()) {
+                // Not in cache, load it (32x32 for high DPI crispness)
+                Image img = LoadMacOSIcon(res, 32);
+                Texture2D tex = LoadTextureFromImage(img);
+                UnloadImage(img); // Free raw CPU data
+                iconCache[res] = tex;
+            }
+
+            Texture2D icon = iconCache[res];
+            DrawTexturePro(icon, {0, 0, (float)icon.width, (float)icon.height},
+                           {(float)(barX + 20), (float)resultY, (float)iconSize, (float)iconSize},
+                           {0, 0}, 0.0f, WHITE);
+
+            // 2. Text Display
+            std::string displayPath = res;
+            if (displayPath.length() > 60) {
+                displayPath = "..." + displayPath.substr(displayPath.length() - 57);
+            }
+
+            // Offset text to right of icon
+            DrawText(displayPath.c_str(), barX + 20 + iconSize + 10, resultY + 2, 20, COL_TEXT);
+            resultY += 30; // Increased spacing
         }
 
         EndDrawing();
+    }
+
+    // Cleanup Textures
+    for (auto &entry : iconCache) {
+        UnloadTexture(entry.second);
     }
 
     CloseWindow();
