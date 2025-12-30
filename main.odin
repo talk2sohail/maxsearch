@@ -43,10 +43,13 @@ starts_with_ci :: proc(s, prefix: string) -> bool {
 
 main :: proc() {
 	rl.SetConfigFlags({.WINDOW_UNDECORATED, .WINDOW_TRANSPARENT, .MSAA_4X_HINT})
-	rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "MaxSearch - Odin")
+	rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "MaxSearch")
 	defer rl.CloseWindow()
 
-	rl.SetTargetFPS(60)
+
+	refresh_rate := rl.GetMonitorRefreshRate(rl.GetCurrentMonitor())
+	rl.SetTargetFPS(refresh_rate)
+
 
 	// State
 	search_query: [dynamic]byte
@@ -56,6 +59,8 @@ main :: proc() {
 	suggestion_display_extra := ""
 	frame_counter := 0
 	is_dragging := false
+	drag_anchor := rl.Vector2{}
+
 	// Engine
 	engine: SearchEngine
 	se_init(&engine)
@@ -85,6 +90,7 @@ main :: proc() {
 		if rl.IsMouseButtonPressed(.LEFT) {
 			if rl.CheckCollisionPointRec(mouse_pos, search_bar_rect) {
 				is_dragging = true
+				drag_anchor = mouse_pos
 			}
 		}
 		if rl.IsMouseButtonReleased(.LEFT) {
@@ -92,11 +98,24 @@ main :: proc() {
 		}
 
 		if is_dragging {
-			delta := rl.GetMouseDelta()
-			win_pos := rl.GetWindowPosition()
-			rl.SetWindowPosition(i32(win_pos.x + delta.x), i32(win_pos.y + delta.y))
-		}
+			// Physics-based Dragging (Spring/Lerp)
+			// We calculate the distance (tension) between current mouse and our anchor
+			delta := mouse_pos - drag_anchor
 
+			// Stiffness: 0.1 = Very Loose/Heavy, 0.9 = Instant/Rigid
+			// 0.6 Provides a good balance of responsiveness and smoothing
+			stiffness :: 0.6
+
+			// Deadzone: Prevents micro-jitter when holding still
+			if (delta.x * delta.x + delta.y * delta.y) > 1.0 {
+				move := delta * stiffness
+
+				wp := rl.GetWindowPosition()
+				new_pos := rl.Vector2{f32(wp.x), f32(wp.y)} + move
+
+				rl.SetWindowPosition(i32(new_pos.x), i32(new_pos.y))
+			}
+		}
 		// Calculate Suggestion Suffix & Open Label
 		suggestion_suffix = ""
 		suggestion_display_extra = ""
