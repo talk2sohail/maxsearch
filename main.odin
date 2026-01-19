@@ -6,15 +6,18 @@ import "core:strings"
 import rl "vendor:raylib"
 
 // -----------------------------------------------------------------------------
-// Constants & Theme
+// Constants & Theme (Classic 90s)
 // -----------------------------------------------------------------------------
 
-COL_BAR_BG :: rl.Color{20, 25, 40, 200} // Deep Glass
-COL_BORDER :: rl.Color{120, 140, 180, 80} // Soft Rim
-COL_TEXT :: rl.Color{192, 202, 245, 255}
-COL_ACCENT :: rl.Color{122, 162, 247, 255}
-COL_ICON :: rl.Color{169, 177, 214, 200}
-COL_GHOST :: rl.Color{169, 177, 214, 100}
+// Palette: Windows 95 / Classic Mac Style
+COL_BG :: rl.Color{192, 192, 192, 255} // Standard Gray
+COL_WINDOW_TEXT :: rl.Color{0, 0, 0, 255} // Black
+COL_TITLE_BG :: rl.Color{0, 0, 128, 255} // Classic Blue
+COL_TITLE_TEXT :: rl.Color{255, 255, 255, 255} // White
+COL_INPUT_BG :: rl.Color{255, 255, 255, 255} // White
+COL_LIGHT :: rl.Color{255, 255, 255, 255} // Bevel Highlight
+COL_SHADOW :: rl.Color{128, 128, 128, 255} // Bevel Shadow
+COL_DARK_SHADOW :: rl.Color{0, 0, 0, 255} // Deep Shadow (Borders)
 
 SCREEN_WIDTH :: 700
 SCREEN_HEIGHT :: 400
@@ -37,6 +40,39 @@ starts_with_ci :: proc(s, prefix: string) -> bool {
 	return true
 }
 
+// Draw a classic 3D Bevel Box
+draw_bevel_box :: proc(rect: rl.Rectangle, raised: bool, fill_color: rl.Color) {
+	x := i32(rect.x)
+	y := i32(rect.y)
+	w := i32(rect.width)
+	h := i32(rect.height)
+
+	// Fill
+	rl.DrawRectangleRec(rect, fill_color)
+
+	// Colors
+	c_tl_outer := raised ? COL_LIGHT : COL_SHADOW
+	c_tl_inner := raised ? COL_BG : COL_DARK_SHADOW
+	c_br_inner := raised ? COL_SHADOW : COL_BG
+	c_br_outer := raised ? COL_DARK_SHADOW : COL_LIGHT
+
+	// Top/Left Outer
+	rl.DrawLine(x, y, x + w - 1, y, c_tl_outer)
+	rl.DrawLine(x, y, x, y + h - 1, c_tl_outer)
+
+	// Top/Left Inner
+	rl.DrawLine(x + 1, y + 1, x + w - 2, y + 1, c_tl_inner)
+	rl.DrawLine(x + 1, y + 1, x + 1, y + h - 2, c_tl_inner)
+
+	// Bottom/Right Inner
+	rl.DrawLine(x + 1, y + h - 2, x + w - 2, y + h - 2, c_br_inner)
+	rl.DrawLine(x + w - 2, y + 1, x + w - 2, y + h - 2, c_br_inner)
+
+	// Bottom/Right Outer
+	rl.DrawLine(x, y + h - 1, x + w, y + h - 1, c_br_outer)
+	rl.DrawLine(x + w - 1, y, x + w - 1, y + h, c_br_outer)
+}
+
 // -----------------------------------------------------------------------------
 // Main
 // -----------------------------------------------------------------------------
@@ -46,10 +82,8 @@ main :: proc() {
 	rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "MaxSearch")
 	defer rl.CloseWindow()
 
-
 	refresh_rate := rl.GetMonitorRefreshRate(rl.GetCurrentMonitor())
 	rl.SetTargetFPS(refresh_rate)
-
 
 	// State
 	search_query: [dynamic]byte
@@ -60,6 +94,7 @@ main :: proc() {
 	frame_counter := 0
 	is_dragging := false
 	drag_anchor := rl.Vector2{}
+	should_close := false 
 
 	// Engine
 	engine: SearchEngine
@@ -67,16 +102,28 @@ main :: proc() {
 	defer se_destroy(&engine)
 
 	// Geometry
-	margin :: 10.0
-	bar_width :: SCREEN_WIDTH - (margin * 2)
-	bar_height :: 70.0 - (margin * 2)
-	bar_x :: margin
-	bar_y :: margin
+	padding :: f32(6.0)
+	title_height :: f32(24.0)
 
-	search_bar_rect := rl.Rectangle{bar_x, bar_y, bar_width, bar_height}
+	// Layout Constants
+	HEIGHT_COMPACT :: 74
+	HEIGHT_EXPANDED :: 400
 
-	for !rl.WindowShouldClose() {
-		// Reset temp allocator at the start of each frame to avoid memory leaks
+	current_window_h := i32(HEIGHT_COMPACT)
+	rl.SetWindowSize(SCREEN_WIDTH, current_window_h)
+
+	// Search bar geometry is static relative to top
+	search_bar_y := padding + title_height + padding
+	search_bar_height :: f32(32.0)
+	search_bar_rect := rl.Rectangle {
+		padding,
+		search_bar_y,
+		SCREEN_WIDTH - padding * 2,
+		search_bar_height,
+	}
+
+	for !rl.WindowShouldClose() && !should_close {
+		// Reset temp allocator at the start of each frame
 		free_all(context.temp_allocator)
 
 		// Update
@@ -85,10 +132,39 @@ main :: proc() {
 		// Fetch latest results safely
 		current_results := se_get_results(&engine)
 
-		// Window Dragging
+		// Dynamic Resizing Logic
+		target_h := i32(HEIGHT_COMPACT)
+		if len(current_results) > 0 {
+			target_h = HEIGHT_EXPANDED
+		}
+
+		if target_h != current_window_h {
+			rl.SetWindowSize(SCREEN_WIDTH, target_h)
+			current_window_h = target_h
+		}
+
+		// Update Dynamic Layout Rects
+		main_rect := rl.Rectangle{0, 0, SCREEN_WIDTH, f32(current_window_h)}
+		// Title rect is always at top
+		title_rect := rl.Rectangle{padding, padding, SCREEN_WIDTH - padding * 2, title_height}
+
+		results_y := search_bar_y + search_bar_height + padding
+		results_h := f32(current_window_h) - results_y - padding
+		results_rect := rl.Rectangle{padding, results_y, SCREEN_WIDTH - padding * 2, results_h}
+		
+		// Close "Button" Geometry
+		close_btn_size :: 16.0
+		close_btn_x := title_rect.x + title_rect.width - close_btn_size - 2
+		close_btn_y := title_rect.y + (title_rect.height - close_btn_size) / 2
+		close_btn_rect := rl.Rectangle{close_btn_x, close_btn_y, close_btn_size, close_btn_size}
+
+		// Window Dragging (Only on Title Bar) & Close Button
+
 		mouse_pos := rl.GetMousePosition()
 		if rl.IsMouseButtonPressed(.LEFT) {
-			if rl.CheckCollisionPointRec(mouse_pos, search_bar_rect) {
+			if rl.CheckCollisionPointRec(mouse_pos, close_btn_rect) {
+				should_close = true
+			} else if rl.CheckCollisionPointRec(mouse_pos, title_rect) {
 				is_dragging = true
 				drag_anchor = mouse_pos
 			}
@@ -98,24 +174,22 @@ main :: proc() {
 		}
 
 		if is_dragging {
-			// Physics-based Dragging (Spring/Lerp)
-			// We calculate the distance (tension) between current mouse and our anchor
 			delta := mouse_pos - drag_anchor
+			// Standard windows dragging is usually rigid 1:1, but we can keep a tiny smoothing or go instant
+			// For Retro feel, instant (stiffness 1.0) is more authentic, but let's keep it slightly smooth (0.8)
+			stiffness :: 0.9
 
-			// Stiffness: 0.1 = Very Loose/Heavy, 0.9 = Instant/Rigid
-			// 0.6 Provides a good balance of responsiveness and smoothing
-			stiffness :: 0.6
-
-			// Deadzone: Prevents micro-jitter when holding still
 			if (delta.x * delta.x + delta.y * delta.y) > 1.0 {
 				move := delta * stiffness
-
 				wp := rl.GetWindowPosition()
 				new_pos := rl.Vector2{f32(wp.x), f32(wp.y)} + move
-
 				rl.SetWindowPosition(i32(new_pos.x), i32(new_pos.y))
 			}
 		}
+
+	
+
+
 		// Calculate Suggestion Suffix & Open Label
 		suggestion_suffix = ""
 		suggestion_display_extra = ""
@@ -126,17 +200,13 @@ main :: proc() {
 			first_path := current_results[0]
 			filename := filepath.base(first_path)
 
-			// 1. Check for Text Completion
 			if starts_with_ci(filename, query_str) {
 				suggestion_suffix = filename[len(query_str):]
 			}
-
-			// 2. Check for "Open" status (App detection)
-			// Case-insensitive check for .app extension
 			if len(first_path) > 4 {
 				ext := first_path[len(first_path) - 4:]
 				if strings.to_lower(ext) == ".app" {
-					suggestion_display_extra = "  —  Open"
+					suggestion_display_extra = " [APP]"
 				}
 			}
 		}
@@ -160,10 +230,10 @@ main :: proc() {
 			key = rl.GetCharPressed()
 		}
 
+		// handling the logic to delete input from the input box
 		if rl.IsKeyPressed(.BACKSPACE) || rl.IsKeyPressedRepeat(.BACKSPACE) {
 			if len(search_query) > 0 {
 				if rl.IsKeyDown(.LEFT_ALT) || rl.IsKeyDown(.RIGHT_ALT) {
-					// Delete word (simple approx)
 					for len(search_query) > 0 && search_query[len(search_query) - 1] == ' ' {
 						pop(&search_query)
 					}
@@ -186,105 +256,103 @@ main :: proc() {
 		// Draw
 		// ---------------------------------------------------------------------
 		rl.BeginDrawing()
-		rl.ClearBackground(rl.BLANK)
+		rl.ClearBackground(rl.BLANK) // Clear with transparent for the OS window context
 
-		// 1. Search Bar Background
-		rl.DrawRectangleRounded(search_bar_rect, 0.8, 20, COL_BAR_BG)
-		rl.DrawRectangleRoundedLines(search_bar_rect, 0.8, 20, COL_BORDER)
+		// 1. Main Window Body (Raised 3D)
+		draw_bevel_box(main_rect, true, COL_BG)
 
-		// 2. Icon (Magnifying Glass)
-		icon_center_x := i32(bar_x + 25)
-		icon_center_y := i32(bar_y + bar_height / 2)
-		radius := 8.5
+		// 2. Title Bar (Blue gradient or solid)
+		rl.DrawRectangleRec(title_rect, COL_TITLE_BG)
+		rl.DrawText("MaxSearch", i32(title_rect.x) + 4, i32(title_rect.y) + 4, 10, COL_TITLE_TEXT) // Small retro font
 
-		rl.DrawCircleLines(icon_center_x, icon_center_y, f32(radius), COL_ICON)
-		rl.DrawCircleLines(icon_center_x, icon_center_y, f32(radius - 0.5), COL_ICON)
 
-		start := rl.Vector2{f32(icon_center_x) + 5, f32(icon_center_y) + 5}
-		end := rl.Vector2{f32(icon_center_x) + 12, f32(icon_center_y) + 12}
-		rl.DrawLineEx(start, end, 3.0, COL_ICON)
+		// Close "Button" (Visual only for now, just a box)
+		draw_bevel_box(close_btn_rect, true, COL_BG)
+		rl.DrawText("x", i32(close_btn_rect.x) + 5, i32(close_btn_rect.y) - 1, 10, COL_WINDOW_TEXT)
+		
 
-		// 3. Text & Cursor
-		base_text_x := i32(bar_x + 55)
-		text_padding := i32(4)
-		font_size := i32(28)
-		cursor_height := i32(32)
+		// 3. Search Bar (Sunken 3D)
+		draw_bevel_box(search_bar_rect, false, COL_INPUT_BG)
 
-		cursor_y_f := bar_y + (bar_height - f32(cursor_height)) / 2
-		cursor_y_i := i32(cursor_y_f) + 1
+		// Text & Cursor
+		text_x := i32(search_bar_rect.x + 8)
+		text_y := i32(search_bar_rect.y + 6)
+		font_size := i32(20)
 
-		text_y_i := (cursor_y_i + (cursor_height - font_size) / 2) + 1
-
-		// We update query_str again in case it changed via Tab
 		query_str = string(search_query[:])
 
 		if len(search_query) == 0 {
-			rl.DrawText(
-				"Max Search here",
-				base_text_x + text_padding,
-				text_y_i,
-				font_size,
-				rl.Fade(COL_TEXT, 0.5),
-			)
+			// Placeholder
 		} else {
-			// User Text
 			c_query := strings.clone_to_cstring(query_str, context.temp_allocator)
-			rl.DrawText(c_query, base_text_x + text_padding, text_y_i, font_size, COL_TEXT)
-			// Bold effect
-			rl.DrawText(c_query, base_text_x + text_padding + 1, text_y_i, font_size, COL_TEXT)
+			rl.DrawText(c_query, text_x, text_y, font_size, COL_WINDOW_TEXT)
 
-			// Ghost Text & Open Label
 			user_text_width := rl.MeasureText(c_query, font_size)
-			current_x := base_text_x + text_padding + user_text_width
 
-			// Draw path completion if available
+			// Ghost Text
 			if len(suggestion_suffix) > 0 {
 				c_suffix := strings.clone_to_cstring(suggestion_suffix, context.temp_allocator)
-				rl.DrawText(c_suffix, current_x, text_y_i, font_size, COL_GHOST)
-				current_x += rl.MeasureText(c_suffix, font_size)
+				rl.DrawText(c_suffix, text_x + user_text_width, text_y, font_size, COL_SHADOW)
+				user_text_width += rl.MeasureText(c_suffix, font_size)
 			}
 
-			// Draw " --- Open" if applicable
+			// [APP] Label
 			if len(suggestion_display_extra) > 0 {
 				c_extra := strings.clone_to_cstring(
 					suggestion_display_extra,
 					context.temp_allocator,
 				)
-				rl.DrawText(c_extra, current_x, text_y_i, font_size, rl.Fade(COL_ACCENT, 0.7))
+				rl.DrawText(c_extra, text_x + user_text_width, text_y, font_size, COL_TITLE_BG)
 			}
 		}
-		// Blinking Cursor
+
+		// Cursor (I-Beam or Block)
+
 		if (frame_counter / 30) % 2 == 0 {
-			cursor_x := base_text_x
+			cursor_x := text_x
 			if len(search_query) > 0 {
 				c_query := strings.clone_to_cstring(query_str, context.temp_allocator)
-				cursor_x += rl.MeasureText(c_query, font_size) + text_padding + 3
+				cursor_x += rl.MeasureText(c_query, font_size)
 			}
-			rl.DrawRectangle(cursor_x, cursor_y_i, 3, cursor_height, COL_ACCENT)
+			// Classic "Thin Line" cursor
+			rl.DrawRectangle(cursor_x + 1, text_y, 1, 20, COL_WINDOW_TEXT)
 		}
 
-		// 4. Results List
-		result_y := i32(bar_y + bar_height + 10)
-		icon_size := 24
-
-		for res in current_results {
-			// Placeholder for icon
-			rl.DrawRectangle(i32(bar_x + 20), result_y, i32(icon_size), i32(icon_size), COL_ICON)
-
-			// Text
-			display_path := res
-			if len(display_path) > 60 {
-				// Proper truncation with "..."
-				suffix := display_path[len(display_path) - 57:]
-				display_path = fmt.tprintf("...%s", suffix)
+		// 4. Results List (Sunken 3D) - Only draw if we have results
+		if len(current_results) > 0 {
+			draw_bevel_box(results_rect, false, COL_INPUT_BG)
+			// List Items
+			list_start_y := i32(results_rect.y) + 6
+			item_height :: 20
+			for res, i in current_results {
+				y_pos := list_start_y + i32(i) * item_height
+				if y_pos + item_height > i32(results_rect.y + results_rect.height) {
+					break // Clip
+				}
+				// Simple Selection Highlight (First item is always "selected" concept)
+				if i == 0 {
+					// Dotted selection box or blue highlight? Classic Windows uses blue for selection.
+					// Let's do a blue box
+					highlight_rect := rl.Rectangle {
+						results_rect.x + 2,
+						f32(y_pos),
+						results_rect.width - 4,
+						f32(item_height),
+					}
+					rl.DrawRectangleRec(highlight_rect, COL_TITLE_BG)
+				}
+				// Text
+				display_path := res
+				// Truncate from middle or end? End is simpler
+				if len(display_path) > 70 {
+					suffix := display_path[len(display_path) - 67:]
+					display_path = fmt.tprintf("...%s", suffix)
+				}
+				c_path := strings.clone_to_cstring(display_path, context.temp_allocator)
+				text_col := (i == 0) ? COL_TITLE_TEXT : COL_WINDOW_TEXT
+				rl.DrawText(c_path, i32(results_rect.x) + 6, y_pos + 2, 10, text_col)
 			}
-
-			c_path := strings.clone_to_cstring(display_path, context.temp_allocator)
-			rl.DrawText(c_path, i32(bar_x) + 20 + i32(icon_size) + 10, result_y + 2, 20, COL_TEXT)
-
-			result_y += 30
 		}
-
 		rl.EndDrawing()
 	}
 }
